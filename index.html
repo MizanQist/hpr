@@ -90,10 +90,12 @@
   // landscape viewports get the 16:9 render, portrait ones the 9:16 render; chosen once at load
   const wide = matchMedia('(orientation: landscape)').matches;
   video.poster = wide ? 'media/poster-wide.jpg' : 'media/poster.jpg';
-  video.src = wide ? 'media/watch-wide.mp4' : 'media/watch.mp4';
+  const file = wide ? 'media/watch-wide.mp4' : 'media/watch.mp4';
   video.pause();
 
-  if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    video.src = file;
+  } else {
     let target = 0, current = 0, last = performance.now();
 
     const onScroll = () => {
@@ -110,10 +112,19 @@
       requestAnimationFrame(tick);
     };
 
+    // iOS renders seeks only once the decoder has started: start it and pause straight away.
+    // If that is blocked (Low Power Mode), retry on the first touch.
+    const prime = () => video.play().then(() => video.pause())
+      .catch(() => addEventListener('touchend', prime, { once: true }));
+
     addEventListener('scroll', onScroll, { passive: true });
     addEventListener('resize', onScroll);
-    video.addEventListener('loadedmetadata', () => { onScroll(); requestAnimationFrame(tick); }, { once: true });
-    if (video.readyState >= 1) video.dispatchEvent(new Event('loadedmetadata'));
+    video.addEventListener('loadedmetadata', () => { onScroll(); prime(); requestAnimationFrame(tick); }, { once: true });
+
+    // iOS ignores preload and shows nothing for seeks into unloaded ranges, so load the whole clip first
+    fetch(file).then(r => r.ok ? r.blob() : Promise.reject(r.status))
+      .then(blob => { video.src = URL.createObjectURL(blob); })
+      .catch(() => { video.src = file; });
   }
 </script>
 </body>
